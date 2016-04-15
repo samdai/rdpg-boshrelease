@@ -3,7 +3,7 @@ set -x
 package="consul"
 version="0.5.2"
 file="${package}-${version}.zip"
-url="https://dl.bintray.com/mitchellh/consul/${version}_linux_amd64.zip"
+url="https://releases.hashicorp.com/consul/${version}/consul_${version}_linux_amd64.zip"
 
 if [[ ! -s "${package}/${file}" ]]
 then

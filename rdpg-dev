@@ -145,6 +145,11 @@ prepare_dev_release() {
   bosh -n upload release
 }
 
+create_folders() {
+  [[ -d ${releasePath}/stemcells ]] || mkdir ${releasePath}/stemcells
+  [[ -d ${releasePath}/manifests ]] || mkdir ${releasePath}/manifests
+}
+
 prepare_manifest() {
   select_infrastructure $*
   determine_stemcell $*
@@ -167,7 +172,7 @@ prepare_manifest() {
     "${templatesPath}/stub.yml" > "${tmpPath}/targeted-director-stub.yml"
 
   echo "Merging templates using spruce..."
-  
+
   if [[ ! -f ${templatesPath}/s3.yml ]]
   then
     cp ${templatesPath}/.defaults/s3.yml ${templatesPath}/
@@ -225,6 +230,7 @@ case ${action} in
       usage
       fail
     fi
+    create_folders
     prepare_blobs
     prepare_dev_release
     prepare_stemcell "${args[@]}"

@@ -2,10 +2,9 @@
 set -e
 
 package="consul-ui"
-version="0.5.0"
+version="0.5.2"
 file="${package}-${version}.zip"
 
 unzip ${package}/${file}
 
 cp -a dist/* $BOSH_INSTALL_TARGET
-

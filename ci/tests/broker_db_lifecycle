@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+
+fail() { echo $* ; exit 1 ; }
+
+export \
+  RDPGD_LOG_LEVEL=trace \
+  RDPGD_SB_PORT=8888 \
+  RDPGD_SB_USER=cfadmin \
+  RDPGD_SB_PASS=cfadmin \
+  RDPGD_ADMIN_PORT=58888 \
+  RDPGD_POOL_SIZE=10 \
+  RDPGD_ADMIN_PG_URI="postgresql://postgres:admin@10.244.2.16:7432/rdpg?sslmode=disable&connect_timeout=5&fallback_application_name=rdpgd" \
+  RDPGD_SERVICE_DNS="10.244.2.16:8888"
+
+tempInstanceId="$(uuidgen)"
+organizationId="$(uuidgen)"
+spaceId="$(uuidgen)"
+bindingId="$(uuidgen)"
+appId="$(uuidgen)"
+bindIp="${bindIp:-10.244.2.16}"
+
+cl="$(curl ${1:-} -s -X GET -H "X-Broker-API-Version: 2.4" -H "Content-Type: application/json" "http://cfadmin:cfadmin@${bindIp}:8888/v2/catalog")"
+planId="$(echo $cl | jq '.services[0].plans[1].id' | tr -d '"')"
+planName="$(echo $cl | jq '.services[0].plans[1].name' | tr -d '"')"
+serviceId="$(echo $cl | jq '.services[0].id '| tr -d '"')"
+echo "Plan Name: ${planName}, Plan Id: ${planId}, Service Id: ${serviceId}"
+
+if [[ ${planName} != "shared-nr" ]] ; then fail "Did not retrieve the shared-nr plan!" ; fi
+
+echo "Provisioning instance..."
+instanceId="$(curl -s -X PUT -H "X-Broker-API-Version: 2.4" -H "Content-Type: application/json" "http://cfadmin:cfadmin@${bindIp}:8888/v2/service_instances/${tempInstanceId}" -d "{ \"service_id\": \"${serviceId}\", \"plan_id\": \"${planId}\", \"organization_guid\": \"${organizationId}\", \"space_guid\": \"${spaceId}\" }" | jq '.[]' | awk '{print $3}' | tr -d '"' | tr -d '\n')"
+#echo "Service Instance: ${instanceId}"
+
+if [[ -z ${instanceId} ]] ; then fail "Could not determine InstanceID!" ; fi
+
+echo "Bind instance..."
+URI="$(curl -s -X PUT -H "X-Broker-API-Version: 2.4" -H "Content-Type: application/json" "http://cfadmin:cfadmin@${bindIp}:8888/v2/service_instances/${instanceId}/service_bindings/${bindingId}" -d "{ \"service_id\": \"${serviceId}\", \"plan_id\": \"${planId}\", \"app_guid\": \"${appId}\"}" | jq '.credentials.uri' | tr -d '"')"
+echo "URI: ${URI}"
+
+if [[ -z ${URI} ]] ; then fail "Could not determine URI!" ; fi
+
+echo "Using URI to connect to database..."
+if ! psql "${URI}" -t -c "SELECT true;"
+then fail "Could not execute psql statement!"
+fi
+
+echo "Unbinding..."
+unbind="$(curl -s -X DELETE -H "X-Broker-API-Version: 2.4" -H "Content-Type: application/json" "http://cfadmin:cfadmin@${bindIp}:8888/v2/service_instances/${instanceId}/service_bindings/${bindingId}" | jq '.Status')"
+if [[ "$unbind" != "200" ]] ; then fail "Unbind was not successful!" ; fi
+
+echo "Deprovisioning..."
+deprovision="$(curl -s -X DELETE -H "X-Broker-API-Version: 2.4" -H "Content-Type: application/json" "http://cfadmin:cfadmin@${bindIp}:8888/v2/service_instances/${instanceId}" | jq '.Status')"
+if [[ "$deprovision" != "200" ]] ; then fail "Deprovisioning was not successful!" ; fi
+
+echo "Using URI to connect to database..."
+psql "${URI}" -t -c "SELECT true;"
+while [ $? -eq 0 ]; do
+  echo "Waiting 5 seconds and trying again..."
+  sleep 5
+  psql "${URI}" -t -c "SELECT true;"
+done
+
+if [[ $? -eq 0 ]] ; then fail "Could still connect to the database after deprovisioning!" ; fi
+
+export bindingId instanceId URI bindIp
+echo "***********************************************"
+echo "********* Script ran successfully *************"
+echo "***********************************************"

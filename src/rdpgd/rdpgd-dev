@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 
-fail() { echo $* ; exit 1 ; }
+fail() { echo "$*" ; exit 1 ; }
 
 dev_release() {
   go get -u github.com/laher/goxc
   go get -u github.com/aktau/github-release
-  $GOPATH/bin/goxc -pv ${version}
+  "${GOPATH}/bin/goxc" -pv "${version}"
   echo "Release Archive Generated: .releases/${version}/rdpgd_${version}_linux_amd64.tar.gz"
 }
 
@@ -19,43 +19,45 @@ final_release() {
   go get -u github.com/laher/goxc
   go get -u github.com/aktau/github-release
 
-  $GOPATH/bin/goxc -pv ${version}
+  "${GOPATH}/bin/goxc" -pv "${version}"
   releaseMsg="RDPG Daemon (rdpgd) Release ${version}"
-  git tag -a ${version} -m "${releaseMsg}"
+  git tag -a "${version}" -m "${releaseMsg}"
   for remote in $(git remote)
-  do git push ${remote} --tags || true
+  do git push "${remote}" --tags || true
   done
 
-  $GOPATH/bin/github-release release \
+  "${GOPATH}/bin/github-release" release \
     --user starkandwayne \
     --repo rdpgd \
-    --tag ${version} \
+    --tag "${version}" \
     --name "RDPG Daemon (rdpgd) Release ${version}" \
     --description "RDPG Agent to run with the RDPG BOSH Release: https://github.com/starkandwayne/rdpg-boshrelease"
 
-  $GOPATH/bin/github-release upload \
+  "${GOPATH}/bin/github-release" upload \
     --user starkandwayne \
     --repo rdpgd \
-    --tag ${version} \
+    --tag "${version}" \
     --name "rdpgd_${version}_linux_amd64.tar.gz" \
     --file "./.releases/${version}/rdpgd_${version}_linux_amd64.tar.gz"
 }
 
 get_catalog() {
-  curl ${1:-} -s -X GET -H "X-Broker-API-Version: 2.4" -H "Content-Type: application/json" \
-    http://cfadmin:cfadmin@10.244.2.2:8888/v2/catalog
+  curl "${1:-}" -s -X GET -H "X-Broker-API-Version: 2.8" \
+    -H "Content-Type: application/json" \
+    "${RDPGD_ADMIN_API_BASE_URL}/v2/catalog"
   echo
 }
 
 export \
   RDPGD_LOG_LEVEL=trace \
-  RDPGD_SB_PORT=8888 \
-  RDPGD_SB_USER=cfadmin \
-  RDPGD_SB_PASS=cfadmin \
-  RDPGD_ADMIN_PORT=58888 \
+  RDPGD_SB_PORT="${RDPGD_SB_PORT:-"8888"}" \
+  RDPGD_SB_USER="${RDPGD_SB_USER:-"cfadmin"}" \
+  RDPGD_SB_PASS="${RDPGD_SB_PASS:-"cfadmin"}" \
+  RDPGD_ADMIN_PORT="${RDPGD_ADMIN_PORT:-"58888"}" \
   RDPGD_POOL_SIZE=10 \
-  RDPGD_ADMIN_PG_URI="postgresql://postgres:admin@10.244.2.2:7432/rdpg?sslmode=disable&connect_timeout=5&fallback_application_name=rdpgd" \
-  RDPGD_SERVICE_DNS="10.244.2.2:8888"
+  RDPGD_SB_IP="${RDPGD_SB_IP:-10.244.2.2}" \
+  RDPGD_ADMIN_PG_URI="postgresql://postgres:admin@${RDPGD_SB_IP}:7432/rdpg?sslmode=disable&connect_timeout=5&fallback_application_name=rdpgd" \
+  RDPGD_ADMIN_API_BASE_URL="http://cfadmin:cfadmin@${RDPGD_SB_IP}:${RDPGD_SB_PORT}"
 
 action=$1
 shift || echo "No action given!!"
@@ -75,20 +77,20 @@ case ${action} in
     ;;
   (tunnel)
     echo "Password when prompted: c1oudc0w"
-    exec ssh  -L 55432:127.0.0.1:7432 vcap@10.244.2.2
+    exec ssh  -L 55432:127.0.0.1:7432 "vcap@${RDPGD_SB_IP}:${RDPGD_SB_PORT}"
     ;;
   (test)
     exec go test
     ;;
   (convey)
     export RDPGD_LOG_LEVEL=error
-    export GOPATH="$PWD/Godeps/_workspace"
-    mkdir -p ${GOPATH}/src/github.com/starkandwayne
-    if ! [[ -L ${GOPATH}/src/github.com/starkandwayne/rdpgd ]]
-    then ln -sf ${PWD} ${GOPATH}/src/github.com/starkandwayne/rdpgd
+    export GOPATH="${PWD}/Godeps/_workspace"
+    mkdir -p "${GOPATH}/src/github.com/starkandwayne"
+    if ! [[ -L "${GOPATH}/src/github.com/starkandwayne/rdpgd" ]]
+    then ln -sf "${PWD}" "${GOPATH}/src/github.com/starkandwayne/rdpgd"
     fi
     go get -u github.com/smartystreets/goconvey
-    exec $GOPATH/bin/goconvey
+    exec "${GOPATH}/bin/goconvey"
     ;;
   (catalog)
     get_catalog -v
@@ -101,7 +103,7 @@ case ${action} in
     echo "instanceId=${instanceId}"
     set -v -x
     curl -v -s -X PUT -H "X-Broker-API-Version: 2.4" -H "Content-Type: application/json" \
-      "http://cfadmin:cfadmin@10.244.2.2:8888/v2/service_instances/${instanceId}" \
+      "${RDPGD_ADMIN_API_BASE_URL}/v2/service_instances/${instanceId}" \
       -d "{ \"service_id\": \"${serviceId}\", \"plan_id\": \"${planId}\", \"organization_guid\": \"${organizationId}\", \"space_guid\": \"${spaceId}\" }"
     echo
     ;;
@@ -110,7 +112,7 @@ case ${action} in
     if [[ -z ${instanceId} ]] ; then fail "Please specify an InstanceID!" ; fi
     set -x -v
     curl -v -X PUT -H "X-Broker-API-Version: 2.4" -H "Content-Type: application/json" \
-      "http://cfadmin:cfadmin@10.244.2.2:8888/v2/service_instances/${instanceId}/service_bindings/${bindingId}" \
+      "${RDPGD_ADMIN_API_BASE_URL}/v2/service_instances/${instanceId}/service_bindings/${bindingId}" \
       -d "{ \"service_id\": \"${serviceId}\", \"plan_id\": \"${planId}\", \"app_guid\": \"${appId}\"}"
     echo
     ;;
@@ -120,14 +122,14 @@ case ${action} in
     if [[ -z ${instanceId} ]] ; then fail "Please specify an InstanceID!" ; fi
     if [[ -z ${bindingId} ]] ; then fail "Please specify a BindingID!" ; fi
     curl -v -X DELETE -H "X-Broker-API-Version: 2.4" -H "Content-Type: application/json" \
-      "http://cfadmin:cfadmin@10.244.2.2:8888/v2/service_instances/${instanceId}/service_bindings/${bindingId}"
+      "${RDPGD_ADMIN_API_BASE_URL}/v2/service_instances/${instanceId}/service_bindings/${bindingId}"
     echo
     ;;
   (deprovision)
     id=$1
     if [[ -z ${instanceId} ]] ; then fail "Please specify an InstanceID!" ; fi
     curl -X DELETE -H "X-Broker-API-Version: 2.4" -v \
-      "http://cfadmin:cfadmin@10.244.2.2:8888/v2/service_instances/${id}"
+      "${RDPGD_ADMIN_API_BASE_URL}/v2/service_instances/${id}"
     echo
     ;;
   (dev_release)
@@ -146,8 +148,8 @@ case ${action} in
     ;;
   (cf_integration_test)
     set -v
-    cf create-service-broker rdpg cfadmin cfadmin http://${RDPGD_SERVICE_DNS}
-    cf enable-service-access rdpg -o $USER
+    cf create-service-broker rdpg cfadmin cfadmin "http://${RDPGD_SERVICE_API}:${RDPGD_SB_PORT}"
+    cf enable-service-access rdpg -o "${USER}"
     cf marketplace
     cf create-service rdpg shared rdpg-service-1
     cf services

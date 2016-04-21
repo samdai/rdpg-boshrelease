@@ -92,7 +92,7 @@ func configureGlobalPGBouncer() (err error) {
 			return err
 		}
 		log.Trace(fmt.Sprintf("gpb.configureGlobalPGBouncer() master ip for database %s on cluster! %s", hostIP, i.Database))
-		pi = append(pi, fmt.Sprintf(`%s = host=%s port=%s dbname=%s`, i.Database, hostIP, "7432", i.Database))
+		pi = append(pi, fmt.Sprintf(`%s = host=%s port=%s dbname=%s`, i.Database, hostIP, "6432", i.Database))
 		pu = append(pu, fmt.Sprintf(`"%s" "%s"`, i.User, i.Pass))
 	}
 	pi = append(pi, "")
@@ -112,16 +112,24 @@ func configureGlobalPGBouncer() (err error) {
 		return err
 	}
 
+	beforeChecksumUser, _ := getFileChecksum(userOutputFile)
+
 	err = ioutil.WriteFile(userOutputFile, []byte(strings.Join(pu, "\n")), 0640)
 	if err != nil {
 		log.Error(fmt.Sprintf("gpb.configureGlobalPGBouncer() ! %s", err))
 		return err
 	}
 
-	if bytes.Equal(beforeChecksum, afterChecksum) {
-		log.Info(fmt.Sprintf("gpb.configureGlobalPGBouncer() Checksum before: %x after: %x, since there are no changes not reloading pgBouncer", beforeChecksum, afterChecksum))
+	afterChecksumUser, err := getFileChecksum(userOutputFile)
+	if err != nil {
+		log.Error(fmt.Sprintf("gpb.configureGlobalPGBouncer() Could not determine the checksum of the pgbouncer user file ! %s", err))
+		return err
+	}
+
+	if bytes.Equal(beforeChecksum, afterChecksum) && bytes.Equal(beforeChecksumUser, afterChecksumUser) {
+		log.Info(fmt.Sprintf("gpb.configureGlobalPGBouncer() Checksum for pgbouncer.ini before: %x after: %x, user before %x after: %x, since there are no changes not reloading pgBouncer", beforeChecksum, afterChecksum, beforeChecksumUser, afterChecksumUser))
 	} else {
-		log.Info(fmt.Sprintf("gpb.configureGlobalPGBouncer() Checksum before: %x after: %x, since there are changes reloading pgBouncer", beforeChecksum, afterChecksum))
+		log.Info(fmt.Sprintf("gpb.configureGlobalPGBouncer() Checksum for pgboucner.ini before: %x after: %x, user before %x after: %x, since there are changes reloading pgBouncer", beforeChecksum, afterChecksum, beforeChecksumUser, afterChecksumUser))
 		cmd := exec.Command("/var/vcap/jobs/global-pgbouncer/bin/control", "reload")
 		err = cmd.Run()
 		if err != nil {

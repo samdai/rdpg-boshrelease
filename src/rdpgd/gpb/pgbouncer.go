@@ -35,10 +35,13 @@ func Work() {
 
 	for {
 
+		start := time.Now()
 		err := configureGlobalPGBouncer()
 		if err != nil {
 			log.Error(fmt.Sprintf(`gpb.configureGlobalPGBouncer() ! Error: %s`, err))
 		}
+		duration := int(time.Since(start).Seconds())
+		log.Info(fmt.Sprintf(`It took %d seconds to process configureGlobalPGBouncer()...`, duration))
 
 		log.Info(fmt.Sprintf(`Time goes by, sleeping for %d seconds...`, pgbFrequency))
 		time.Sleep(time.Duration(pgbFrequency) * time.Second)

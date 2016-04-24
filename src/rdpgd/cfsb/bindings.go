@@ -4,11 +4,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
+	consulapi "github.com/hashicorp/consul/api"
+	"github.com/starkandwayne/rdpgd/globals"
 	"github.com/starkandwayne/rdpgd/instances"
 	"github.com/starkandwayne/rdpgd/log"
 	"github.com/starkandwayne/rdpgd/pg"
+	"github.com/starkandwayne/rdpgd/uuid"
 )
 
 type Binding struct {
@@ -156,5 +160,101 @@ func (b *Binding) Remove() (err error) {
 	if err != nil {
 		log.Error(fmt.Sprintf(`cfsb.Binding#Remove(%s) b.Creds.Remove() ! %s`, b.BindingID, err))
 	}
+
+	//The code below this point was added to reset the password on the unbind event
+
+	i, err := instances.FindByInstanceID(b.InstanceID)
+	if err != nil {
+		log.Error(fmt.Sprintf(`cfsb.Binding#Remove(%s) instances.FindByInstanceID(%s) ! %s`, b.BindingID, b.InstanceID, err))
+		return
+	}
+
+	if i.ClusterService == `pgbdr` {
+		log.Info(fmt.Sprintf(`cfsb.binding#Remove(%s) This is a BDR database, skipping resetting the password, otherwise unbind is complete`, b.BindingID))
+		return
+	}
+
+	//Get ip of the master for the service cluster
+	hostIP, err := getMasterIP(i.ClusterID)
+	if err != nil {
+		log.Error(fmt.Sprintf("cfsb.Binding#Remove() Could not resolve master ip for database %s on cluster %s, password could not be reset", i.Database, i.ClusterID))
+		return err
+	}
+
+	//Create new password
+	re := regexp.MustCompile("[^A-Za-z0-9_]")
+	u2 := uuid.NewUUID().String()
+	dbpass := strings.ToLower(string(re.ReplaceAll([]byte(u2), []byte(""))))
+
+	//Connect to the service cluster master node rdpg db
+	sc := pg.NewPG(hostIP, globals.PGPort, `rdpg`, `rdpg`, globals.PGPass)
+	scdb, err := sc.Connect()
+	if err != nil {
+		log.Error(fmt.Sprintf("cfsb.Binding#Remove() Attempted to remotely connect to %s ! %s", hostIP, err))
+		return
+	}
+	defer scdb.Close()
+
+	sq = fmt.Sprintf(`ALTER USER %s ENCRYPTED PASSWORD '%s';`, i.User, dbpass)
+	_, err = scdb.Exec(sq)
+	if err != nil {
+		log.Error(fmt.Sprintf(`cfsb.Binding#Remove() Could not update password for db user(%s) ! %s`, i.User, err))
+		return
+	}
+
+	sq = fmt.Sprintf(`UPDATE cfsb.instances SET dbpass = '%s' WHERE dbname = '%s';`, dbpass, i.Database)
+	_, err = scdb.Exec(sq)
+	if err != nil {
+		log.Error(fmt.Sprintf(`cfsb.Binding#Remove() Could not update password on service cluster %s for db user(%s) ! %s`, i.ClusterID, i.User, err))
+		return
+	}
+
+	sq = fmt.Sprintf(`INSERT INTO tasks.tasks (cluster_id,node,role,action,data,node_type, cluster_service) VALUES ('%s','%s','service','Reconfigure','pgbouncer','any','%s')`, i.ClusterID, hostIP, i.ClusterService)
+	_, err = scdb.Exec(sq)
+	if err != nil {
+		log.Error(fmt.Sprintf(`cfsb.Binding#Remove() Could not force pgBouncer to reload on service cluster %s for db user(%s) ! %s`, i.ClusterID, i.User, err))
+		return
+	}
+
+	//Update cfsb.instances on MC node with new password
+	sq = fmt.Sprintf(`UPDATE cfsb.instances SET dbpass = '%s' WHERE dbname = '%s';`, dbpass, i.Database)
+	_, err = db.Exec(sq)
+	if err != nil {
+		log.Error(fmt.Sprintf(`cfsb.Binding#Remove() Could not update password on the management cluster for db user(%s) ! %s`, i.User, err))
+		return
+	}
+
+	log.Info(fmt.Sprintf(`cfsb.Binding#Remove(%s) Unbind complete, password reset for user %s`, b.BindingID, i.User))
 	return
+}
+
+func getMasterIP(clusterName string) (masterIP string, err error) {
+
+	mcConsulIP := `127.0.0.1:8500`
+
+	log.Trace(fmt.Sprintf("cfsb#bindings.getMasterIP() Calling out to Consul at address %s", mcConsulIP))
+
+	consulConfig := consulapi.DefaultConfig()
+	consulConfig.Address = mcConsulIP
+	consulClient, err := consulapi.NewClient(consulConfig)
+	if err != nil {
+		log.Error(fmt.Sprintf(`cfsb#bindings.getMasterIP() Consul IP: %s ! %s`, mcConsulIP, err))
+		return
+	}
+
+	masterNode, _, err := consulClient.Catalog().Service(fmt.Sprintf(`%s-master`, clusterName), "", nil)
+	if err != nil {
+		log.Error(fmt.Sprintf("cfsb#bindings.getMasterIP() Cluster Name: %s ! %s", clusterName, err))
+		return
+	}
+
+	if len(masterNode) == 0 {
+		masterIP = "0.0.0.0"
+		return masterIP, errors.New("Could not find the consul master ip")
+	}
+
+	masterIP = masterNode[0].Address
+	log.Trace(fmt.Sprintf("cfsb#bindings.getMasterIP() Found master ip for %s = %s", clusterName, masterIP))
+	return masterIP, err
+
 }

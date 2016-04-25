@@ -20,9 +20,9 @@ appId="$(uuidgen)"
 bindIp="${bindIp:-10.244.2.16}"
 
 cl="$(curl ${1:-} -s -X GET -H "X-Broker-API-Version: 2.4" -H "Content-Type: application/json" "http://cfadmin:cfadmin@${bindIp}:8888/v2/catalog")"
-planId="$(echo $cl | jq '.services[0].plans[1].id' | tr -d '"')"
-planName="$(echo $cl | jq '.services[0].plans[1].name' | tr -d '"')"
-serviceId="$(echo $cl | jq '.services[0].id '| tr -d '"')"
+planId="$(echo $cl | jq -r '.services[0].plans[1].id')"
+planName="$(echo $cl | jq -r '.services[0].plans[1].name')"
+serviceId="$(echo $cl | jq -r '.services[0].id')"
 echo "Plan Name: ${planName}, Plan Id: ${planId}, Service Id: ${serviceId}"
 
 if [[ ${planName} != "shared-nr" ]] ; then fail "Did not retrieve the shared-nr plan!" ; fi
@@ -34,7 +34,7 @@ instanceId="$(curl -s -X PUT -H "X-Broker-API-Version: 2.4" -H "Content-Type: ap
 if [[ -z ${instanceId} ]] ; then fail "Could not determine InstanceID!" ; fi
 
 echo "Bind instance..."
-URI="$(curl -s -X PUT -H "X-Broker-API-Version: 2.4" -H "Content-Type: application/json" "http://cfadmin:cfadmin@${bindIp}:8888/v2/service_instances/${instanceId}/service_bindings/${bindingId}" -d "{ \"service_id\": \"${serviceId}\", \"plan_id\": \"${planId}\", \"app_guid\": \"${appId}\"}" | jq '.credentials.uri' | tr -d '"')"
+URI="$(curl -s -X PUT -H "X-Broker-API-Version: 2.4" -H "Content-Type: application/json" "http://cfadmin:cfadmin@${bindIp}:8888/v2/service_instances/${instanceId}/service_bindings/${bindingId}" -d "{ \"service_id\": \"${serviceId}\", \"plan_id\": \"${planId}\", \"app_guid\": \"${appId}\"}" | jq -r '.credentials.uri')"
 echo "URI: ${URI}"
 
 if [[ -z ${URI} ]] ; then fail "Could not determine URI!" ; fi
@@ -57,12 +57,8 @@ deprovision="$(curl -s -X DELETE -H "X-Broker-API-Version: 2.4" -H "Content-Type
 if [[ "$deprovision" != "200" ]] ; then fail "Deprovisioning was not successful!" ; fi
 
 echo "Using URI to connect to database..."
+sleep 5
 psql "${URI}" -t -c "SELECT true;"
-while [ $? -eq 0 ]; do
-  echo "Waiting 5 seconds and trying again..."
-  sleep 5
-  psql "${URI}" -t -c "SELECT true;"
-done
 
 if [[ $? -eq 0 ]] ; then fail "Could still connect to the database after deprovisioning!" ; fi
 

@@ -72,6 +72,8 @@ jobs:
     properties:
       rdpgd_service:
         matrix_name: sc-pgbdr-m0-r1
+        extensions:
+          - ltree
 
   - name: sc-pgbdr-m1-r0
     resource_pool: rdpg
@@ -84,7 +86,6 @@ jobs:
         cluster_service: "postgresql"
         matrix_name: sc-pgbdr-m1-r0
         extensions:
-          - postgis
           - ltree
 
   - name: top-level-haproxy

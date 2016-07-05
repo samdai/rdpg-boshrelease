@@ -16,11 +16,11 @@ type Credentials struct {
 	URI        string `json:"uri"`
 	DSN        string `json:"dsn"`
 	JDBCURI    string `json:"jdbc_uri"`
-	Host       string `db:"host" json:"host"`
+	Host       string `db:"host" json:"hostname"`
 	Port       string `db:"port" json:"port"`
 	UserName   string `db:"dbuser" json:"username"`
 	Password   string `db:"dbpass" json:"password"`
-	Database   string `db:"dbname" json:"database"`
+	Database   string `db:"dbname" json:"dbname"`
 }
 
 // Create Credentials in the data store

@@ -136,7 +136,7 @@ func (i *Instance) JDBCURI() (uri string, err error) {
 		log.Error(fmt.Sprintf("instances.Instance#JDBCURI(%s) ! %s", i.ClusterID))
 		return
 	}
-	d := `jdbc:postgres://%s:%s@%s/%s?sslmode=%s`
+	d := `jdbc:postgresql://%s:%s@%s/%s?sslmode=%s`
 	uri = fmt.Sprintf(d, i.User, i.Pass, dns, i.Database, `disable`)
 	return
 }

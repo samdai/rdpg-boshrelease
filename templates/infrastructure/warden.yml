@@ -62,6 +62,8 @@ jobs:
     properties:
       rdpgd_service:
         matrix_name: sc-pgbdr-m0-r0
+        extensions:
+          - ltree
 
   - name: sc-pgbdr-m0-r1
     resource_pool: rdpg
